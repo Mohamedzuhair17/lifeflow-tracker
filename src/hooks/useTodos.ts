@@ -1,78 +1,87 @@
 import { useState, useEffect, useCallback } from "react";
 import { Todo, Priority, TodoStatus } from "@/lib/types";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "./useAuth";
 import { toast } from "sonner";
 
 export const useTodos = () => {
-  const [todos, setTodos] = useState<Todo[]>([]);
-  const [loading, setLoading] = useState(true);
   const { user } = useAuth();
+  const [todos, setTodos] = useState<Todo[]>(() => {
+    const saved = localStorage.getItem("lifetrack_todos");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [loading, setLoading] = useState(false);
 
-  // Fetch todos from database
-  const fetchTodos = useCallback(async () => {
-    if (!user) {
-      setTodos([]);
-      setLoading(false);
-      return;
-    }
-    const { data, error } = await supabase
-      .from("todos")
-      .select("*")
-      .order("created_at", { ascending: false });
+  // Sync from Supabase on mount/auth change
+  useEffect(() => {
+    if (!user) return;
 
-    if (error) {
-      console.error("Error fetching todos:", error);
-      toast.error("Failed to load tasks");
-    } else {
-      setTodos(
-        (data || []).map((t) => ({
+    const fetchTodos = async () => {
+      setLoading(true);
+      console.log("Fetching todos from Supabase for user:", user.id);
+
+      const { data, error } = await supabase
+        .from("todos")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Supabase fetch error:", error);
+        toast.error("Failed to load todos from cloud: " + error.message);
+      } else if (data) {
+        console.log("Fetched todos from Supabase:", data.length, "items");
+        const mappedTodos: Todo[] = data.map((t) => ({
           id: t.id,
           title: t.title,
           priority: t.priority as Priority,
           status: t.status as TodoStatus,
           date: t.date,
+          isDaily: t.is_daily,
           createdAt: t.created_at,
-        }))
-      );
-    }
-    setLoading(false);
+        }));
+        setTodos(mappedTodos);
+        localStorage.setItem("lifetrack_todos", JSON.stringify(mappedTodos));
+      }
+      setLoading(false);
+    };
+
+    fetchTodos();
   }, [user]);
 
+  // Persistence to localStorage
   useEffect(() => {
-    fetchTodos();
-  }, [fetchTodos]);
+    if (!user) {
+      localStorage.setItem("lifetrack_todos", JSON.stringify(todos));
+    }
+  }, [todos, user]);
 
   const addTodo = useCallback(
-    async (title: string, priority: Priority, date: string) => {
-      if (!user) return;
-      const { data, error } = await supabase
-        .from("todos")
-        .insert({
-          user_id: user.id,
-          title: title.trim(),
-          priority,
-          status: "pending",
-          date,
-        })
-        .select()
-        .single();
+    async (title: string, priority: Priority, date: string, isDaily: boolean = false) => {
+      const id = crypto.randomUUID();
+      const newTodo: Todo = {
+        id,
+        title: title.trim(),
+        priority,
+        status: "pending",
+        date,
+        isDaily,
+        createdAt: new Date().toISOString(),
+      };
 
-      if (error) {
-        console.error("Error adding todo:", error);
-        toast.error("Failed to add task");
-      } else if (data) {
-        setTodos((prev) => [
-          {
-            id: data.id,
-            title: data.title,
-            priority: data.priority as Priority,
-            status: data.status as TodoStatus,
-            date: data.date,
-            createdAt: data.created_at,
-          },
-          ...prev,
-        ]);
+      setTodos((prev) => [newTodo, ...prev]);
+
+      if (user) {
+        const { error } = await supabase.from("todos").insert({
+          id,
+          user_id: user.id,
+          title: newTodo.title,
+          priority: newTodo.priority,
+          status: newTodo.status,
+          date: newTodo.date,
+          is_daily: newTodo.isDaily,
+        });
+        if (error) toast.error("Cloud sync failed: " + error.message);
       }
     },
     [user]
@@ -80,43 +89,60 @@ export const useTodos = () => {
 
   const toggleTodo = useCallback(
     async (id: string) => {
-      const todo = todos.find((t) => t.id === id);
-      if (!todo) return;
-      const newStatus = todo.status === "completed" ? "pending" : "completed";
+      let newStatus: TodoStatus = "pending";
+      let updatedTodos: Todo[] = [];
 
-      // Optimistic update
-      setTodos((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, status: newStatus } : t))
-      );
+      setTodos((prev) => {
+        updatedTodos = prev.map((t) => {
+          if (t.id === id) {
+            newStatus = t.status === "completed" ? "pending" : "completed";
+            return { ...t, status: newStatus };
+          }
+          return t;
+        });
+        return updatedTodos;
+      });
 
-      const { error } = await supabase
-        .from("todos")
-        .update({ status: newStatus })
-        .eq("id", id);
+      // Persist to localStorage immediately
+      localStorage.setItem("lifetrack_todos", JSON.stringify(updatedTodos));
 
-      if (error) {
-        console.error("Error toggling todo:", error);
-        // Revert
-        setTodos((prev) =>
-          prev.map((t) => (t.id === id ? { ...t, status: todo.status } : t))
-        );
-        toast.error("Failed to update task");
+      if (user) {
+        console.log(`Updating todo ${id} to status: ${newStatus} for user: ${user.id}`);
+
+        const { error, data } = await supabase
+          .from("todos")
+          .update({ status: newStatus })
+          .eq("id", id)
+          .eq("user_id", user.id)
+          .select();
+
+        if (error) {
+          console.error("Toggle todo error:", error);
+          toast.error("Failed to sync: " + error.message);
+        } else {
+          console.log("Successfully updated todo in Supabase:", data);
+          toast.success(newStatus === "completed" ? "Task completed! 🎉" : "Task reopened");
+        }
+      } else {
+        console.warn("No user found, only saving locally");
+        toast.success(newStatus === "completed" ? "Task completed! 🎉" : "Task reopened");
       }
     },
-    [todos]
+    [user]
   );
 
   const deleteTodo = useCallback(async (id: string) => {
     setTodos((prev) => prev.filter((t) => t.id !== id));
 
-    const { error } = await supabase.from("todos").delete().eq("id", id);
-
-    if (error) {
-      console.error("Error deleting todo:", error);
-      toast.error("Failed to delete task");
-      fetchTodos(); // re-fetch on error
+    if (user) {
+      const { error } = await supabase
+        .from("todos")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id);
+      if (error) toast.error("Cloud sync failed: " + error.message);
     }
-  }, [fetchTodos]);
+  }, [user]);
 
   const getFilteredTodos = useCallback(
     (month?: string, status?: TodoStatus) => {
@@ -144,6 +170,62 @@ export const useTodos = () => {
     [todos]
   );
 
+  const getDailyRitualsStats = useCallback(() => {
+    const daily = todos.filter((t) => t.isDaily);
+    const completed = daily.filter((t) => t.status === "completed").length;
+    return {
+      total: daily.length,
+      completed,
+      pending: daily.length - completed,
+      completionRate: daily.length > 0 ? Math.round((completed / daily.length) * 100) : 0,
+    };
+  }, [todos]);
+
+  const getGamificationStats = useCallback(() => {
+    const completedTodos = todos.filter((t) => t.status === "completed");
+
+    // XP Logic: 10 XP per normal task, 20 XP per daily ritual
+    const totalXP = completedTodos.reduce((acc, t) => acc + (t.isDaily ? 20 : 10), 0);
+    const level = Math.floor(totalXP / 100) + 1;
+    const progressToNextLevel = totalXP % 100;
+
+    // Streak Logic: Consecutive days with at least one daily ritual completed
+    const dailyCompletions = todos
+      .filter((t) => t.isDaily && t.status === "completed")
+      .map((t) => t.date)
+      .sort();
+
+    const uniqueDates = Array.from(new Set(dailyCompletions));
+    let currentStreak = 0;
+    const today = new Date().toISOString().split("T")[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+
+    if (uniqueDates.length > 0) {
+      const lastDate = uniqueDates[uniqueDates.length - 1];
+      if (lastDate === today || lastDate === yesterday) {
+        currentStreak = 1;
+        for (let i = uniqueDates.length - 2; i >= 0; i--) {
+          const d1 = new Date(uniqueDates[i + 1]);
+          const d2 = new Date(uniqueDates[i]);
+          const diff = (d1.getTime() - d2.getTime()) / (1000 * 3600 * 24);
+          if (diff === 1) {
+            currentStreak++;
+          } else {
+            break;
+          }
+        }
+      }
+    }
+
+    return {
+      totalXP,
+      level,
+      progressToNextLevel,
+      currentStreak,
+      totalCompleted: completedTodos.length
+    };
+  }, [todos]);
+
   return {
     todos,
     loading,
@@ -152,5 +234,7 @@ export const useTodos = () => {
     deleteTodo,
     getFilteredTodos,
     getMonthlyStats,
+    getDailyRitualsStats,
+    getGamificationStats,
   };
 };

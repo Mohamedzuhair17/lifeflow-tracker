@@ -21,6 +21,7 @@ export interface Todo {
   priority: Priority;
   status: TodoStatus;
   date: string; // ISO date string
+  isDaily?: boolean; // New field for recurring daily tasks
   createdAt: string;
 }
 

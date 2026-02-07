@@ -10,7 +10,8 @@ import {
   Smartphone,
   TrendingUp,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import heroBg from "@/assets/hero-bg.jpg";
 
 const features = [
@@ -65,36 +66,43 @@ const item = {
   show: { opacity: 1, y: 0 },
 };
 
+import { useAuth } from "@/hooks/useAuth";
+
 const LandingPage = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) return null;
+
   return (
     <div className="min-h-screen bg-background">
       {/* Nav */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Zap className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold tracking-tight">LifeTrack</span>
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="Focus Logo" className="h-7 w-7 object-contain" />
+            <span className="text-xl font-bold tracking-tight">Focus</span>
           </div>
-          <Link to="/auth">
-            <Button size="sm" className="gap-2">
-              Get Started <ArrowRight className="h-4 w-4" />
-            </Button>
+          <Link
+            to={user ? "/dashboard" : "/auth"}
+            className={cn(buttonVariants({ size: "sm" }), "gap-2")}
+          >
+            {user ? "Dashboard" : "Get Started"} <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
       </nav>
 
       {/* Hero */}
       <section className="relative pt-16 overflow-hidden">
-        <div className="absolute inset-0 gradient-hero opacity-50" />
+        <div className="absolute inset-0 gradient-hero opacity-50 pointer-events-none" />
         <div
-          className="absolute inset-0 opacity-10"
+          className="absolute inset-0 opacity-10 pointer-events-none"
           style={{
             backgroundImage: `url(${heroBg})`,
             backgroundSize: "cover",
             backgroundPosition: "center",
           }}
         />
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 sm:py-32 lg:py-40">
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 sm:py-32 lg:py-40">
           <motion.div
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
@@ -107,7 +115,7 @@ const LandingPage = () => {
               transition={{ delay: 0.2 }}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-8 border border-primary/20"
             >
-              <Zap className="h-4 w-4" />
+              <img src="/logo.png" alt="Logo" className="h-4 w-4" />
               All-in-One Personal Management
             </motion.div>
 
@@ -122,23 +130,25 @@ const LandingPage = () => {
               dashboard.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link to="/auth">
-                <Button size="lg" className="gap-2 text-base px-8">
-                  Start Tracking <ArrowRight className="h-5 w-5" />
-                </Button>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center relative z-20">
+              <Link
+                to={user ? "/dashboard" : "/auth"}
+                className={cn(buttonVariants({ size: "lg" }), "gap-2 text-base px-8")}
+              >
+                {user ? "Go to Dashboard" : "Start Tracking"} <ArrowRight className="h-5 w-5" />
               </Link>
-              <a href="#features">
-                <Button variant="outline" size="lg" className="text-base px-8">
-                  See Features
-                </Button>
+              <a
+                href="#features"
+                className={cn(buttonVariants({ variant: "outline", size: "lg" }), "text-base px-8")}
+              >
+                See Features
               </a>
             </div>
           </motion.div>
         </div>
 
         {/* Decorative glow */}
-        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-primary/5 rounded-full blur-[120px] animate-pulse_glow" />
+        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-primary/5 rounded-full blur-[120px] animate-pulse_glow pointer-events-none" />
       </section>
 
       {/* Features */}
@@ -201,10 +211,11 @@ const LandingPage = () => {
               Start tracking your tasks, finances, and productivity today.
               Create your free account in seconds.
             </p>
-            <Link to="/auth">
-              <Button size="lg" className="gap-2 text-base px-8">
-                Launch LifeTrack <ArrowRight className="h-5 w-5" />
-              </Button>
+            <Link
+              to={user ? "/dashboard" : "/auth"}
+              className={cn(buttonVariants({ size: "lg" }), "gap-2 text-base px-8")}
+            >
+              {user ? "Explore your Dashboard" : "Launch Focus"} <ArrowRight className="h-5 w-5" />
             </Link>
           </motion.div>
         </div>
@@ -214,11 +225,11 @@ const LandingPage = () => {
       <footer className="border-t border-border py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Zap className="h-5 w-5 text-primary" />
-            <span className="font-semibold">LifeTrack</span>
+            <img src="/logo.png" alt="Focus Logo" className="h-5 w-5 object-contain" />
+            <span className="font-semibold">Focus</span>
           </div>
           <p className="text-sm text-muted-foreground">
-            © 2026 LifeTrack. Your data, your control.
+            © 2026 Focus. Your data, your control.
           </p>
         </div>
       </footer>

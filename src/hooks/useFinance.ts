@@ -1,47 +1,56 @@
 import { useState, useEffect, useCallback } from "react";
 import { FinanceEntry, FinanceType } from "@/lib/types";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "./useAuth";
 import { toast } from "sonner";
 
 export const useFinance = () => {
-  const [entries, setEntries] = useState<FinanceEntry[]>([]);
-  const [loading, setLoading] = useState(true);
   const { user } = useAuth();
+  const [entries, setEntries] = useState<FinanceEntry[]>(() => {
+    const saved = localStorage.getItem("lifetrack_finance");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [loading, setLoading] = useState(false);
 
-  const fetchEntries = useCallback(async () => {
-    if (!user) {
-      setEntries([]);
-      setLoading(false);
-      return;
-    }
-    const { data, error } = await supabase
-      .from("finance_entries")
-      .select("*")
-      .order("created_at", { ascending: false });
+  // Sync from Supabase
+  useEffect(() => {
+    if (!user) return;
 
-    if (error) {
-      console.error("Error fetching finance entries:", error);
-      toast.error("Failed to load finance data");
-    } else {
-      setEntries(
-        (data || []).map((e) => ({
+    const fetchFinance = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("finance_entries")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("date", { ascending: false });
+
+      if (data) {
+        const mapped: FinanceEntry[] = data.map((e) => ({
           id: e.id,
           type: e.type as FinanceType,
           category: e.category as FinanceEntry["category"],
-          amount: Number(e.amount),
+          amount: e.amount,
           description: e.description,
           date: e.date,
           createdAt: e.created_at,
-        }))
-      );
-    }
-    setLoading(false);
+        }));
+        setEntries(mapped);
+        localStorage.setItem("lifetrack_finance", JSON.stringify(mapped));
+      } else if (error) {
+        toast.error("Failed to load finance data from cloud");
+      }
+      setLoading(false);
+    };
+
+    fetchFinance();
   }, [user]);
 
+  // Local persistence fallback
   useEffect(() => {
-    fetchEntries();
-  }, [fetchEntries]);
+    if (!user) {
+      localStorage.setItem("lifetrack_finance", JSON.stringify(entries));
+    }
+  }, [entries, user]);
 
   const addEntry = useCallback(
     async (
@@ -51,36 +60,30 @@ export const useFinance = () => {
       description: string,
       date: string
     ) => {
-      if (!user) return;
-      const { data, error } = await supabase
-        .from("finance_entries")
-        .insert({
+      const id = crypto.randomUUID();
+      const newEntry: FinanceEntry = {
+        id,
+        type,
+        category: category as FinanceEntry["category"],
+        amount,
+        description: description.trim(),
+        date,
+        createdAt: new Date().toISOString(),
+      };
+
+      setEntries((prev) => [newEntry, ...prev]);
+
+      if (user) {
+        const { error } = await supabase.from("finance_entries").insert({
+          id,
           user_id: user.id,
           type,
           category,
           amount,
           description: description.trim(),
           date,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error("Error adding entry:", error);
-        toast.error("Failed to add entry");
-      } else if (data) {
-        setEntries((prev) => [
-          {
-            id: data.id,
-            type: data.type as FinanceType,
-            category: data.category as FinanceEntry["category"],
-            amount: Number(data.amount),
-            description: data.description,
-            date: data.date,
-            createdAt: data.created_at,
-          },
-          ...prev,
-        ]);
+        });
+        if (error) toast.error("Cloud sync failed: " + error.message);
       }
     },
     [user]
@@ -90,18 +93,16 @@ export const useFinance = () => {
     async (id: string) => {
       setEntries((prev) => prev.filter((e) => e.id !== id));
 
-      const { error } = await supabase
-        .from("finance_entries")
-        .delete()
-        .eq("id", id);
-
-      if (error) {
-        console.error("Error deleting entry:", error);
-        toast.error("Failed to delete entry");
-        fetchEntries();
+      if (user) {
+        const { error } = await supabase
+          .from("finance_entries")
+          .delete()
+          .eq("id", id)
+          .eq("user_id", user.id);
+        if (error) toast.error("Cloud sync failed: " + error.message);
       }
     },
-    [fetchEntries]
+    [user]
   );
 
   const getMonthlyStats = useCallback(
