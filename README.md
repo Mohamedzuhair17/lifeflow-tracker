@@ -1,6 +1,4 @@
 
-.
-
 🌊 LifeFlow Tracker
 LifeFlow Tracker is a streamlined application designed to help users monitor their daily habits, moods, and productivity. By visualizing your "flow," this tool empowers you to identify patterns and reclaim control over your time.
 
