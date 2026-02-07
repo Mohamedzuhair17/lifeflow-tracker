@@ -36,7 +36,7 @@ const features = [
     icon: Shield,
     title: "Private & Secure",
     description:
-      "Your data stays on your device with local storage. No tracking, no compromise.",
+      "Your data is securely stored in the cloud with user authentication and encryption.",
   },
   {
     icon: Smartphone,
@@ -75,7 +75,7 @@ const LandingPage = () => {
             <Zap className="h-6 w-6 text-primary" />
             <span className="text-xl font-bold tracking-tight">LifeTrack</span>
           </div>
-          <Link to="/dashboard">
+          <Link to="/auth">
             <Button size="sm" className="gap-2">
               Get Started <ArrowRight className="h-4 w-4" />
             </Button>
@@ -123,7 +123,7 @@ const LandingPage = () => {
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link to="/dashboard">
+              <Link to="/auth">
                 <Button size="lg" className="gap-2 text-base px-8">
                   Start Tracking <ArrowRight className="h-5 w-5" />
                 </Button>
@@ -199,9 +199,9 @@ const LandingPage = () => {
             </h2>
             <p className="text-muted-foreground text-lg mb-8 max-w-xl mx-auto">
               Start tracking your tasks, finances, and productivity today.
-              No sign-up required.
+              Create your free account in seconds.
             </p>
-            <Link to="/dashboard">
+            <Link to="/auth">
               <Button size="lg" className="gap-2 text-base px-8">
                 Launch LifeTrack <ArrowRight className="h-5 w-5" />
               </Button>
