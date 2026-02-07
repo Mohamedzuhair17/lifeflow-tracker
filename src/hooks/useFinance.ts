@@ -1,53 +1,108 @@
 import { useState, useEffect, useCallback } from "react";
-import { FinanceEntry, FinanceType, ExpenseCategory } from "@/lib/types";
-
-const STORAGE_KEY = "lifetrack_finance";
-
-const loadEntries = (): FinanceEntry[] => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveEntries = (entries: FinanceEntry[]) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-};
+import { FinanceEntry, FinanceType } from "@/lib/types";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 
 export const useFinance = () => {
-  const [entries, setEntries] = useState<FinanceEntry[]>(loadEntries);
+  const [entries, setEntries] = useState<FinanceEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+
+  const fetchEntries = useCallback(async () => {
+    if (!user) {
+      setEntries([]);
+      setLoading(false);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("finance_entries")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching finance entries:", error);
+      toast.error("Failed to load finance data");
+    } else {
+      setEntries(
+        (data || []).map((e) => ({
+          id: e.id,
+          type: e.type as FinanceType,
+          category: e.category as FinanceEntry["category"],
+          amount: Number(e.amount),
+          description: e.description,
+          date: e.date,
+          createdAt: e.created_at,
+        }))
+      );
+    }
+    setLoading(false);
+  }, [user]);
 
   useEffect(() => {
-    saveEntries(entries);
-  }, [entries]);
+    fetchEntries();
+  }, [fetchEntries]);
 
   const addEntry = useCallback(
-    (
+    async (
       type: FinanceType,
       category: string,
       amount: number,
       description: string,
       date: string
     ) => {
-      const newEntry: FinanceEntry = {
-        id: crypto.randomUUID(),
-        type,
-        category: category as FinanceEntry["category"],
-        amount,
-        description: description.trim(),
-        date,
-        createdAt: new Date().toISOString(),
-      };
-      setEntries((prev) => [newEntry, ...prev]);
+      if (!user) return;
+      const { data, error } = await supabase
+        .from("finance_entries")
+        .insert({
+          user_id: user.id,
+          type,
+          category,
+          amount,
+          description: description.trim(),
+          date,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error adding entry:", error);
+        toast.error("Failed to add entry");
+      } else if (data) {
+        setEntries((prev) => [
+          {
+            id: data.id,
+            type: data.type as FinanceType,
+            category: data.category as FinanceEntry["category"],
+            amount: Number(data.amount),
+            description: data.description,
+            date: data.date,
+            createdAt: data.created_at,
+          },
+          ...prev,
+        ]);
+      }
     },
-    []
+    [user]
   );
 
-  const deleteEntry = useCallback((id: string) => {
-    setEntries((prev) => prev.filter((e) => e.id !== id));
-  }, []);
+  const deleteEntry = useCallback(
+    async (id: string) => {
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+
+      const { error } = await supabase
+        .from("finance_entries")
+        .delete()
+        .eq("id", id);
+
+      if (error) {
+        console.error("Error deleting entry:", error);
+        toast.error("Failed to delete entry");
+        fetchEntries();
+      }
+    },
+    [fetchEntries]
+  );
 
   const getMonthlyStats = useCallback(
     (month: string) => {
@@ -79,7 +134,10 @@ export const useFinance = () => {
       );
       const categoryMap = new Map<string, number>();
       monthExpenses.forEach((e) => {
-        categoryMap.set(e.category, (categoryMap.get(e.category) || 0) + e.amount);
+        categoryMap.set(
+          e.category,
+          (categoryMap.get(e.category) || 0) + e.amount
+        );
       });
       return Array.from(categoryMap, ([name, value]) => ({ name, value }));
     },
@@ -119,6 +177,7 @@ export const useFinance = () => {
 
   return {
     entries,
+    loading,
     addEntry,
     deleteEntry,
     getMonthlyStats,

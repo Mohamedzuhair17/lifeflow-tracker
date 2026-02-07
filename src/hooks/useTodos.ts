@@ -1,56 +1,122 @@
 import { useState, useEffect, useCallback } from "react";
 import { Todo, Priority, TodoStatus } from "@/lib/types";
-
-const STORAGE_KEY = "lifetrack_todos";
-
-const loadTodos = (): Todo[] => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveTodos = (todos: Todo[]) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
-};
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 
 export const useTodos = () => {
-  const [todos, setTodos] = useState<Todo[]>(loadTodos);
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+
+  // Fetch todos from database
+  const fetchTodos = useCallback(async () => {
+    if (!user) {
+      setTodos([]);
+      setLoading(false);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("todos")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching todos:", error);
+      toast.error("Failed to load tasks");
+    } else {
+      setTodos(
+        (data || []).map((t) => ({
+          id: t.id,
+          title: t.title,
+          priority: t.priority as Priority,
+          status: t.status as TodoStatus,
+          date: t.date,
+          createdAt: t.created_at,
+        }))
+      );
+    }
+    setLoading(false);
+  }, [user]);
 
   useEffect(() => {
-    saveTodos(todos);
-  }, [todos]);
+    fetchTodos();
+  }, [fetchTodos]);
 
   const addTodo = useCallback(
-    (title: string, priority: Priority, date: string) => {
-      const newTodo: Todo = {
-        id: crypto.randomUUID(),
-        title: title.trim(),
-        priority,
-        status: "pending",
-        date,
-        createdAt: new Date().toISOString(),
-      };
-      setTodos((prev) => [newTodo, ...prev]);
+    async (title: string, priority: Priority, date: string) => {
+      if (!user) return;
+      const { data, error } = await supabase
+        .from("todos")
+        .insert({
+          user_id: user.id,
+          title: title.trim(),
+          priority,
+          status: "pending",
+          date,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error adding todo:", error);
+        toast.error("Failed to add task");
+      } else if (data) {
+        setTodos((prev) => [
+          {
+            id: data.id,
+            title: data.title,
+            priority: data.priority as Priority,
+            status: data.status as TodoStatus,
+            date: data.date,
+            createdAt: data.created_at,
+          },
+          ...prev,
+        ]);
+      }
     },
-    []
+    [user]
   );
 
-  const toggleTodo = useCallback((id: string) => {
-    setTodos((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? { ...t, status: t.status === "completed" ? "pending" : "completed" }
-          : t
-      )
-    );
-  }, []);
+  const toggleTodo = useCallback(
+    async (id: string) => {
+      const todo = todos.find((t) => t.id === id);
+      if (!todo) return;
+      const newStatus = todo.status === "completed" ? "pending" : "completed";
 
-  const deleteTodo = useCallback((id: string) => {
+      // Optimistic update
+      setTodos((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, status: newStatus } : t))
+      );
+
+      const { error } = await supabase
+        .from("todos")
+        .update({ status: newStatus })
+        .eq("id", id);
+
+      if (error) {
+        console.error("Error toggling todo:", error);
+        // Revert
+        setTodos((prev) =>
+          prev.map((t) => (t.id === id ? { ...t, status: todo.status } : t))
+        );
+        toast.error("Failed to update task");
+      }
+    },
+    [todos]
+  );
+
+  const deleteTodo = useCallback(async (id: string) => {
     setTodos((prev) => prev.filter((t) => t.id !== id));
-  }, []);
+
+    const { error } = await supabase.from("todos").delete().eq("id", id);
+
+    if (error) {
+      console.error("Error deleting todo:", error);
+      toast.error("Failed to delete task");
+      fetchTodos(); // re-fetch on error
+    }
+  }, [fetchTodos]);
 
   const getFilteredTodos = useCallback(
     (month?: string, status?: TodoStatus) => {
@@ -78,5 +144,13 @@ export const useTodos = () => {
     [todos]
   );
 
-  return { todos, addTodo, toggleTodo, deleteTodo, getFilteredTodos, getMonthlyStats };
+  return {
+    todos,
+    loading,
+    addTodo,
+    toggleTodo,
+    deleteTodo,
+    getFilteredTodos,
+    getMonthlyStats,
+  };
 };
